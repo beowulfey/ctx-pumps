@@ -90,8 +90,10 @@ def tab_definer(
     seg_conc_box,
     seg_len_box,
     start_pa_button,
+    start_pb_button,
     start_pump_button,
     stop_pa_button,
+    stop_pb_button,
     stop_pump_button,
     tab1_desired_conc_number,
     update_pump_button,
@@ -125,6 +127,10 @@ def tab_definer(
                                     [mo.md("Flow: "), pbf, mo.md("(ml/min)")]
                                 ),
                                 mo.hstack([mo.md("Direction: "), pbdir]),
+                                mo.hstack(
+                                    [start_pb_button, stop_pb_button],
+                                    justify="start",
+                                ),
                             ]
                         )
                     ),
