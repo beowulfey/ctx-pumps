@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.1.86"
+__generated_with = "0.2.0"
 app = marimo.App()
 
 
@@ -29,7 +29,7 @@ def __(logging, mo):
     return get_log_dir, log_loc, select_log_dir, set_log_dir
 
 
-@app.cell(hide_code=True)
+@app.cell
 def pump_init(mo, nesp_lib):
     banner = mo.md(
         f""" 
@@ -39,7 +39,7 @@ def pump_init(mo, nesp_lib):
 
     # Initialize Pumps
     try:
-        port = nesp_lib.Port("/dev/cu.usbserial-2140", 19200)
+        port = nesp_lib.Port("/dev/cu.usbserial-2130", 19200)
     except:
         port = None
     else:
@@ -225,11 +225,12 @@ def functions(
 
 
     def start_protocol():
+        stop_protocol()
+        set_pump_start(datetime.now())
         _pac = form.value["pac"]
         _pbc = form.value["pbc"]
         _flow = form.value["flow"]
-        stop_protocol()
-        set_pump_start(datetime.now())
+        
         logging.info(
             f" ###############################################################"
         )
@@ -249,7 +250,6 @@ def functions(
 
 
     def advance_time():
-        # print("RUNNING TIME")
         if get_pump_start():
             # print("PUMP STARTED")
             _time = (datetime.now() - get_pump_start()).total_seconds()
@@ -377,20 +377,30 @@ def __(
             mo.hstack(
                 [start_protocol_button, stop_protocol_button], justify="start"
             ),
-            mo.md(f"Start Time is {get_pump_start()}")
-            if get_pump_start()
-            else None,
-            mo.md(
-                f"Current Time is {((get_pump_time()-get_pump_start()).total_seconds()/60):.3f} min"
-            )
-            if get_pump_start()
-            else None,
-            mo.md(f"Total Time is {(get_total_time()/60):.2f} min")
-            if get_pump_start()
-            else None,
-            mo.md(f"Current Concentration is {get_segs()[get_curr_seg()].conc}")
-            if get_pump_start()
-            else None,
+            (
+                mo.md(f"Start Time is {get_pump_start()}")
+                if get_pump_start()
+                else None
+            ),
+            (
+                mo.md(
+                    f"Current Time is {((get_pump_time()-get_pump_start()).total_seconds()/60):.3f} min"
+                )
+                if get_pump_start()
+                else None
+            ),
+            (
+                mo.md(f"Total Time is {(get_total_time()/60):.2f} min")
+                if get_pump_start()
+                else None
+            ),
+            (
+                mo.md(
+                    f"Current Concentration is {get_segs()[get_curr_seg()].conc}"
+                )
+                if get_pump_start()
+                else None
+            ),
         ]
     )
     return tab2,
@@ -443,7 +453,7 @@ def __():
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(
     add_seg,
     clear_segs,
@@ -572,7 +582,7 @@ def seg_refresher(mo, seg_added):
     return seg_conc_box, seg_len_box, tab1_desired_conc_number
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(mo, nesp_lib, port, pump_a, pump_b):
     # UTILITY CONTROL FUNCTIONS
 
