@@ -4,7 +4,7 @@ __generated_with = "0.1.86"
 app = marimo.App()
 
 
-@app.cell(hide_code=True)
+@app.cell
 def title(mo):
     mo.md(
         f"""
@@ -13,6 +13,20 @@ def title(mo):
         """
     )
     return
+
+
+@app.cell
+def __(logging, mo):
+    log_loc = "./run_log.log"
+    logging.basicConfig(filename=log_loc, encoding="utf-8", level=logging.INFO)
+
+
+    def select_log_dir():
+        set_log_dir(get_log_dir())
+
+
+    get_log_dir, set_log_dir = mo.state(None)
+    return get_log_dir, log_loc, select_log_dir, set_log_dir
 
 
 @app.cell(hide_code=True)
@@ -64,19 +78,13 @@ def __(mo):
     return form,
 
 
-@app.cell
-def __(form, mo):
-    def select_log_dir():
-        set_log_dir("DIR")
-
-
-    get_log_dir, set_log_dir = mo.state(None)
-
+@app.cell(disabled=True)
+def __(mo, select_log_dir):
     dirbut = mo.ui.button(
         label="SET LOG LOCATION", kind="info", on_change=lambda _: select_log_dir()
     )
-    dirbut if form.value else None
-    return dirbut, get_log_dir, select_log_dir, set_log_dir
+    # dirbut if form.value else None
+    return dirbut,
 
 
 @app.cell
@@ -96,13 +104,18 @@ def tab_builder(mo, tab1, tab2, tab3):
 def functions(
     Segment,
     datetime,
+    form,
     get_curr_seg,
     get_pump_start,
     get_segs,
     get_total_time,
+    logging,
+    mo,
+    pd_converter,
     port,
     pump_a,
     pump_b,
+    pumps,
     seg_conc_box,
     seg_len_box,
     set_curr_seg,
@@ -111,9 +124,65 @@ def functions(
     set_seg_added,
     set_segs,
     set_total_time,
-    start_pumps,
+    tab1_desired_conc_number,
 ):
     ### THESE ARE FOR THE LOGIC OF THE SEGMENT BUILDER UI
+    def calculate_flowrates(conc_desired):
+        """determines the flow rates for each pump based on the settings"""
+        total_flow = float(form.value["flow"])
+        conc_a = float(form.value["pac"])
+        conc_b = float(form.value["pbc"])
+        a_rate = ((conc_desired - conc_b) / (conc_a - conc_b)) * total_flow
+        b_rate = total_flow - a_rate
+        return [abs(a_rate), abs(b_rate)]
+
+
+    def update_pumps(conc):
+        concs = calculate_flowrates(conc)
+        logging.info(f"{datetime.now()}: pumps updated to {concs} ml/min")
+        if port:
+            for n, pump in enumerate(pumps):
+                pump.pumping_rate = float(concs[n])
+                pump.pumping_direction = pd_converter("INFUSE")
+
+
+    def start_pumps(conc):
+        concs = calculate_flowrates(conc)
+        logging.info(f" {datetime.now()}: Setting flow rates to {concs} ml/min")
+        if port:
+            #    set_flows(concs)
+            if pump_a.running:
+                pump_a.stop()
+            if pump_b.running:
+                pump_b.stop()
+            for n, pump in enumerate(pumps):
+                pump.pumping_rate = float(concs[n])
+
+            pump_a.run(wait_while_running=False)
+            pump_b.run(wait_while_running=False)
+
+
+    def stop_pumps():
+        logging.info(f"{datetime.now()}: BOTH PUMPS STOPPED")
+        if port:
+            pump_a.stop()
+            pump_b.stop()
+
+
+    update_pump_button = mo.ui.button(
+        label="Update settings",
+        on_change=lambda _: update_pumps(tab1_desired_conc_number.value),
+    )
+
+    start_pump_button = mo.ui.button(
+        label="Start Pump",
+        kind="success",
+        on_change=lambda _: start_pumps(tab1_desired_conc_number.value),
+    )
+
+    stop_pump_button = mo.ui.button(
+        label="Stop Pump", kind="danger", on_change=lambda _: stop_pumps()
+    )
 
 
     def add_seg():
@@ -145,6 +214,7 @@ def functions(
 
 
     def stop_protocol():
+        logging.info(f" {datetime.now()}: PROTOCOL STOPPED")
         set_pump_start(None)
         set_pump_time(None)
         set_total_time(None)
@@ -155,17 +225,26 @@ def functions(
 
 
     def start_protocol():
+        _pac = form.value["pac"]
+        _pbc = form.value["pbc"]
+        _flow = form.value["flow"]
         stop_protocol()
+        set_pump_start(datetime.now())
+        logging.info(
+            f" ###############################################################"
+        )
+        logging.info(f" PUMP STARTED: {get_pump_start()}")
+        logging.info(f" Pump A is {_pac} mM, Pump B is {_pbc} mM")
+        logging.info(f" Total flow rate is {_flow} ml/min")
+        logging.info(
+            f" PROTOCOL SETTINGS: (sec, conc) {[(x.time, x.conc) for x in get_segs()]} "
+        )
         _time = 0
         if len(get_segs()) > 0:
             for seg in get_segs():
                 _time = _time + seg.time
-        if port:
-            start_pumps(get_segs()[get_curr_seg()].conc)
-        # print(f"SET PUMPS TO {get_segs()[get_curr_seg()].conc}")
+        start_pumps(get_segs()[get_curr_seg()].conc)
         set_total_time(_time)
-        set_pump_start(datetime.now())
-
         advance_time()
 
 
@@ -191,20 +270,28 @@ def functions(
                 if segi > get_curr_seg():
                     # print("UPDATED PORT")
                     set_curr_seg(segi)
-                    if port:
-                        start_pumps(get_segs()[get_curr_seg()].conc)
-                        # LOG!
-                    # print(f"SET PUMPS TO {get_segs()[get_curr_seg()].conc}")
+                    logging.info(
+                        f" {datetime.now()}: Segment change! Now on segment {segi}"
+                    )
+                    start_pumps(get_segs()[get_curr_seg()].conc)
+                    # LOG!
 
             else:
                 stop_protocol()
     return (
         add_seg,
         advance_time,
+        calculate_flowrates,
         clear_segs,
         rm_last_seg,
         start_protocol,
+        start_pump_button,
+        start_pumps,
         stop_protocol,
+        stop_pump_button,
+        stop_pumps,
+        update_pump_button,
+        update_pumps,
     )
 
 
@@ -239,7 +326,7 @@ def seg_plotter(
         [time / 60 for time in _times],
         _concs,
     )
-    if get_pump_time():
+    if get_pump_time() and get_pump_start():
         plt.axvline((get_pump_time() - get_pump_start()).total_seconds() / 60)
 
 
@@ -294,11 +381,11 @@ def __(
             if get_pump_start()
             else None,
             mo.md(
-               f"Current Time is {(get_pump_time()-get_pump_start()).total_seconds()/60}"
+                f"Current Time is {((get_pump_time()-get_pump_start()).total_seconds()/60):.3f} min"
             )
             if get_pump_start()
             else None,
-            mo.md(f"Total Time is {get_total_time()/60} min")
+            mo.md(f"Total Time is {(get_total_time()/60):.2f} min")
             if get_pump_start()
             else None,
             mo.md(f"Current Concentration is {get_segs()[get_curr_seg()].conc}")
@@ -350,82 +437,10 @@ def classes_states(dataclass, mo):
     )
 
 
-@app.cell(hide_code=True)
-def __(
-    form,
-    mo,
-    pd_converter,
-    port,
-    pump_a,
-    pump_b,
-    pumps,
-    tab1_desired_conc_number,
-):
+@app.cell
+def __():
     # SEGMENT PUMP CONTROLS
-
-
-    def calculate_flowrates(conc_desired):
-        """determines the flow rates for each pump based on the settings"""
-        total_flow = float(form.value["flow"])
-        conc_a = float(form.value["pac"])
-        conc_b = float(form.value["pbc"])
-        a_rate = ((conc_desired - conc_b) / (conc_a - conc_b)) * total_flow
-        b_rate = total_flow - a_rate
-        return [abs(a_rate), abs(b_rate)]
-
-
-    def update_pumps(conc):
-        if port:
-            concs = calculate_flowrates(conc)
-            for n, pump in enumerate(pumps):
-                pump.pumping_rate = float(concs[n])
-                pump.pumping_direction = pd_converter("INFUSE")
-
-
-    def start_pumps(conc):
-        if port:
-            concs = calculate_flowrates(conc)
-            #    set_flows(concs)
-            if pump_a.running:
-                pump_a.stop()
-            if pump_b.running:
-                pump_b.stop()
-            for n, pump in enumerate(pumps):
-                pump.pumping_rate = float(concs[n])
-
-            pump_a.run(wait_while_running=False)
-            pump_b.run(wait_while_running=False)
-
-
-    def stop_pumps():
-        if port:
-            pump_a.stop()
-            pump_b.stop()
-
-
-    update_pump_button = mo.ui.button(
-        label="Update settings",
-        on_change=lambda _: update_pumps(tab1_desired_conc_number.value),
-    )
-
-    start_pump_button = mo.ui.button(
-        label="Start Pump",
-        kind="success",
-        on_change=lambda _: start_pumps(tab1_desired_conc_number.value),
-    )
-
-    stop_pump_button = mo.ui.button(
-        label="Stop Pump", kind="danger", on_change=lambda _: stop_pumps()
-    )
-    return (
-        calculate_flowrates,
-        start_pump_button,
-        start_pumps,
-        stop_pump_button,
-        stop_pumps,
-        update_pump_button,
-        update_pumps,
-    )
+    return
 
 
 @app.cell(hide_code=True)
@@ -670,7 +685,18 @@ def imports():
     from serial.tools import list_ports
     import nesp_lib
     from dataclasses import dataclass
-    return dataclass, datetime, list_ports, mo, nesp_lib, np, plt, time
+    import logging
+    return (
+        dataclass,
+        datetime,
+        list_ports,
+        logging,
+        mo,
+        nesp_lib,
+        np,
+        plt,
+        time,
+    )
 
 
 if __name__ == "__main__":
