@@ -39,7 +39,7 @@ def pump_init(mo, nesp_lib):
 
     # Initialize Pumps
     try:
-        port = nesp_lib.Port("/dev/cu.usbserial-2130", 19200)
+        port = nesp_lib.Port("/dev/cu.usbserial-2134", 19200)
     except:
         port = None
     else:
@@ -101,6 +101,49 @@ def tab_builder(mo, tab1, tab2, tab3):
 
 
 @app.cell
+def seg_plotter(
+    form,
+    get_pump_start,
+    get_pump_time,
+    get_segs,
+    plt,
+    refresh,
+):
+    ### PLOTTING CELL
+    #   This cell builds the plot used for the segment builder
+    refresh
+    # advance_time()
+
+    _concs = []
+    _times = []
+    _count = 0
+
+    for _s in get_segs():
+        _times.append(_count)
+        _concs.append(_s.conc)
+        _count = _count + _s.time
+        _times.append(_count)
+        _concs.append(_s.conc)
+
+    _f, seg_ax = plt.subplots(figsize=(8, 2))
+    seg_ax.plot(
+        [time / 60 for time in _times],
+        _concs,
+    )
+    if get_pump_time() and get_pump_start():
+        plt.axvline((get_pump_time() - get_pump_start()).total_seconds() / 60)
+
+
+    seg_ax.set_ylabel("Conc (mM)")
+    seg_ax.set_xlabel("Time (min)")
+    if form.value:
+        # print("form set")
+        seg_ax.set_ylim([form.value["pac"], form.value["pbc"] * 1.10])
+    _f.tight_layout()
+    return seg_ax,
+
+
+@app.cell
 def functions(
     Segment,
     datetime,
@@ -148,7 +191,7 @@ def functions(
 
     def start_pumps(conc):
         concs = calculate_flowrates(conc)
-        logging.info(f" {datetime.now()}: Setting flow rates to {concs} ml/min")
+        logging.info(f" {datetime.now()}: RUNNING PUMPS AT {concs} ml/min")
         if port:
             #    set_flows(concs)
             if pump_a.running:
@@ -188,7 +231,7 @@ def functions(
     def add_seg():
         """add a segment to the list of segments state"""
         if (
-            seg_len_box.value > 0 and seg_conc_box.value > 0
+            seg_len_box.value > 0 and seg_conc_box.value >= 0
         ):  # no adding blank segments
             set_segs(
                 lambda v: v
@@ -225,12 +268,10 @@ def functions(
 
 
     def start_protocol():
-        stop_protocol()
         set_pump_start(datetime.now())
         _pac = form.value["pac"]
         _pbc = form.value["pbc"]
         _flow = form.value["flow"]
-        
         logging.info(
             f" ###############################################################"
         )
@@ -250,32 +291,42 @@ def functions(
 
 
     def advance_time():
+
         if get_pump_start():
-            # print("PUMP STARTED")
-            _time = (datetime.now() - get_pump_start()).total_seconds()
-            if _time < get_total_time():
-                # print("LESS THAN TIME")
+            #logging.info(f" {datetime.now()} TIME ADVANCE")
+            _time = (
+                datetime.now() - get_pump_start()
+            ).total_seconds()  # get time in protocol
+            if _time < get_total_time():  # we haven't gone through the whole run
                 set_pump_time(datetime.now())
-                timer = get_segs()[0].time
+                timer = get_segs()[
+                    0
+                ].time  # timer starts at the length of segment 1
                 segi = 0
-                # print(f"SEG IS {segi}, TIMER IS {timer}, TIME IS {_time}")
-                while timer <= _time:
-                    # print("timer less than total time")
-                    for n, seg in enumerate(get_segs()):
-                        if n > 0:
-                            # print("adding segment")
-                            segi = segi + 1
-                            timer = timer + seg.time
-                    # print("Timer is", timer)
+                
+                while True:
+                    if timer <= _time:
+                        for n, seg in enumerate(get_segs()):
+                            if n > 0:
+                                segi = segi + 1
+                                timer = timer + seg.time
+                                if timer > _time:
+                                    break
+                        break
+                    else:
+                        # if timer > total time
+                        break
                 if segi > get_curr_seg():
-                    # print("UPDATED PORT")
+                    print("UPDATED PORT")
                     set_curr_seg(segi)
-                    logging.info(
-                        f" {datetime.now()}: Segment change! Now on segment {segi}"
-                    )
+                    #logging.info(
+                    #    f" {datetime.now()}: Segment change! Now on segment {segi}"
+                    #)
                     start_pumps(get_segs()[get_curr_seg()].conc)
                     # LOG!
-
+                logging.info(
+                    f" {datetime.now()} SEG IS {segi}, TIMER IS {timer}, TIME IS {_time}"
+                )
             else:
                 stop_protocol()
     return (
@@ -296,47 +347,10 @@ def functions(
 
 
 @app.cell
-def seg_plotter(
-    advance_time,
-    form,
-    get_pump_start,
-    get_pump_time,
-    get_segs,
-    plt,
-    refresh,
-):
-    ### PLOTTING CELL
-    #   This cell builds the plot used for the segment builder
+def __(advance_time, refresh):
     refresh
     advance_time()
-
-    _concs = []
-    _times = []
-    _count = 0
-
-    for _s in get_segs():
-        _times.append(_count)
-        _concs.append(_s.conc)
-        _count = _count + _s.time
-        _times.append(_count)
-        _concs.append(_s.conc)
-
-    _f, seg_ax = plt.subplots(figsize=(8, 2))
-    seg_ax.plot(
-        [time / 60 for time in _times],
-        _concs,
-    )
-    if get_pump_time() and get_pump_start():
-        plt.axvline((get_pump_time() - get_pump_start()).total_seconds() / 60)
-
-
-    seg_ax.set_ylabel("Conc (mM)")
-    seg_ax.set_xlabel("Time (min)")
-    if form.value:
-        # print("form set")
-        seg_ax.set_ylim([form.value["pac"], form.value["pbc"] * 1.10])
-    _f.tight_layout()
-    return seg_ax,
+    return
 
 
 @app.cell
@@ -406,7 +420,7 @@ def __(
     return tab2,
 
 
-@app.cell(hide_code=True)
+@app.cell
 def classes_states(dataclass, mo):
     ### CLASSES FOR THINGS
     @dataclass
