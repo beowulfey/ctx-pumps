@@ -18,15 +18,14 @@ def title(mo):
 @app.cell
 def __(logging, mo):
     log_loc = "./run_log.log"
+    csv_loc = "protocol_"
+
     logging.basicConfig(filename=log_loc, encoding="utf-8", level=logging.INFO)
 
 
-    def select_log_dir():
-        set_log_dir(get_log_dir())
-
-
-    get_log_dir, set_log_dir = mo.state(None)
-    return get_log_dir, log_loc, select_log_dir, set_log_dir
+    get_csv_loc, set_csv_loc = mo.state(None)
+    # get_log_loc, set_log_loc = mo.state(None)
+    return csv_loc, get_csv_loc, log_loc, set_csv_loc
 
 
 @app.cell
@@ -39,7 +38,7 @@ def pump_init(mo, nesp_lib):
 
     # Initialize Pumps
     try:
-        port = nesp_lib.Port("/dev/cu.usbserial-2134", 19200)
+        port = nesp_lib.Port("/dev/cu.usbserial-2130", 19200)
     except:
         port = None
     else:
@@ -78,13 +77,13 @@ def __(mo):
     return form,
 
 
-@app.cell(disabled=True)
-def __(mo, select_log_dir):
-    dirbut = mo.ui.button(
-        label="SET LOG LOCATION", kind="info", on_change=lambda _: select_log_dir()
-    )
-    # dirbut if form.value else None
-    return dirbut,
+@app.cell
+def __(form, stop_protocol_button):
+    # dirbut = mo.ui.button(
+    #    label="SET LOG LOCATION", kind="info", on_change=lambda _: select_log_dir()
+    # )
+    stop_protocol_button if form.value else None
+    return
 
 
 @app.cell
@@ -146,8 +145,10 @@ def seg_plotter(
 @app.cell
 def functions(
     Segment,
+    csv_loc,
     datetime,
     form,
+    get_csv_loc,
     get_curr_seg,
     get_pump_start,
     get_segs,
@@ -161,6 +162,7 @@ def functions(
     pumps,
     seg_conc_box,
     seg_len_box,
+    set_csv_loc,
     set_curr_seg,
     set_pump_start,
     set_pump_time,
@@ -199,10 +201,11 @@ def functions(
             if pump_b.running:
                 pump_b.stop()
             for n, pump in enumerate(pumps):
-                pump.pumping_rate = float(concs[n])
-
-            pump_a.run(wait_while_running=False)
-            pump_b.run(wait_while_running=False)
+                if float(concs[n]) > 0:
+                    pump.pumping_rate = float(concs[n])
+                    pump.run(wait_while_running=False)
+            # pump_a.run(wait_while_running=False)
+            # pump_b.run(wait_while_running=False)
 
 
     def stop_pumps():
@@ -261,6 +264,7 @@ def functions(
         set_pump_start(None)
         set_pump_time(None)
         set_total_time(None)
+        set_csv_loc(None)
         set_curr_seg(0)
         if port:
             pump_a.stop()
@@ -269,6 +273,9 @@ def functions(
 
     def start_protocol():
         set_pump_start(datetime.now())
+        set_csv_loc(
+            csv_loc + f"{get_pump_start().strftime('%Y-%m-%d_%H-%M')}" + ".csv"
+        )
         _pac = form.value["pac"]
         _pbc = form.value["pbc"]
         _flow = form.value["flow"]
@@ -281,19 +288,25 @@ def functions(
         logging.info(
             f" PROTOCOL SETTINGS: (sec, conc) {[(x.time, x.conc) for x in get_segs()]} "
         )
-        _time = 0
+        logging.info(f" saving run to CSV at {get_csv_loc()}")
+        #with open(get_csv_loc(), "wb", newline="") as f:
+        #    writer = csv.writer(f)
+        #    writer.writerow(["TIME", "CONC", "PUMP_A", "PUMP_B"])
+        #    f.close()
+        _time = 0.0
         if len(get_segs()) > 0:
             for seg in get_segs():
                 _time = _time + seg.time
-        start_pumps(get_segs()[get_curr_seg()].conc)
         set_total_time(_time)
+        logging.info(
+            f" {datetime.now()}: INITIATE: {get_pump_start()}, {get_total_time()}"
+        )
+        start_pumps(get_segs()[get_curr_seg()].conc)
         advance_time()
 
 
     def advance_time():
-
-        if get_pump_start():
-            #logging.info(f" {datetime.now()} TIME ADVANCE")
+        if get_pump_start() != None:
             _time = (
                 datetime.now() - get_pump_start()
             ).total_seconds()  # get time in protocol
@@ -303,7 +316,7 @@ def functions(
                     0
                 ].time  # timer starts at the length of segment 1
                 segi = 0
-                
+
                 while True:
                     if timer <= _time:
                         for n, seg in enumerate(get_segs()):
@@ -317,16 +330,24 @@ def functions(
                         # if timer > total time
                         break
                 if segi > get_curr_seg():
-                    print("UPDATED PORT")
                     set_curr_seg(segi)
-                    #logging.info(
-                    #    f" {datetime.now()}: Segment change! Now on segment {segi}"
-                    #)
+                    logging.info(
+                        f" {datetime.now()}: Segment change! Now on segment {segi}, {get_curr_seg()}"
+                    )
                     start_pumps(get_segs()[get_curr_seg()].conc)
                     # LOG!
                 logging.info(
                     f" {datetime.now()} SEG IS {segi}, TIMER IS {timer}, TIME IS {_time}"
                 )
+                #with open(get_csv_loc(), "w") as f:
+                #    _conc = get_segs()[get_curr_seg()].conc
+                #    _concs = calculate_flowrates(_conc)
+                #    writer = csv.writer(f)
+                #    # writer.writerow('TIME', 'CONC', 'PUMP_A', 'PUMP_B')
+                #    writer.writerow(
+                #        f"{_time}", f"{_conc}", f"{_concs[0]}", f"{_concs[1]}"
+                #    )
+                #    f.close()
             else:
                 stop_protocol()
     return (
@@ -710,7 +731,9 @@ def imports():
     import nesp_lib
     from dataclasses import dataclass
     import logging
+    import csv
     return (
+        csv,
         dataclass,
         datetime,
         list_ports,
