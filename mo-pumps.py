@@ -38,7 +38,7 @@ def pump_init(mo, nesp_lib):
 
     # Initialize Pumps
     try:
-        port = nesp_lib.Port("/dev/cu.usbserial-2130", 19200)
+        port = nesp_lib.Port("/dev/cu.usbserial-210", 19200)
     except:
         port = None
     else:
