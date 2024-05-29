@@ -4,7 +4,7 @@ __generated_with = "0.2.0"
 app = marimo.App()
 
 
-@app.cell
+@app.cell(hide_code=True)
 def title(mo):
     mo.md(
         f"""
@@ -15,21 +15,23 @@ def title(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def __(logging, mo):
+    # Export Run Log for tracking purposes
+
     log_loc = "./run_log.log"
-    csv_loc = "protocol_"
 
     logging.basicConfig(filename=log_loc, encoding="utf-8", level=logging.INFO)
 
-
     get_csv_loc, set_csv_loc = mo.state(None)
-    # get_log_loc, set_log_loc = mo.state(None)
-    return csv_loc, get_csv_loc, log_loc, set_csv_loc
+    return get_csv_loc, log_loc, set_csv_loc
 
 
-@app.cell
+@app.cell(hide_code=True)
 def pump_init(mo, nesp_lib):
+    ###### SET PORT HERE
+    _port = "/dev/cu.usbserial-210"
+
     banner = mo.md(
         f""" 
         # **<span style="color:red"> UNABLE TO CONNECT TO PUMPS** </span>
@@ -38,7 +40,7 @@ def pump_init(mo, nesp_lib):
 
     # Initialize Pumps
     try:
-        port = nesp_lib.Port("/dev/cu.usbserial-210", 19200)
+        port = nesp_lib.Port(_port, 19200)
     except:
         port = None
     else:
@@ -52,6 +54,8 @@ def pump_init(mo, nesp_lib):
 
 @app.cell
 def __(mo):
+    ### Initialize the application for your pump settings.
+
     form = (
         mo.md(
             """
@@ -67,9 +71,9 @@ def __(mo):
     """
         )
         .batch(
-            flow=mo.ui.number(0, 9, 0.1, value=0.167),
-            pac=mo.ui.number(0, 100, 5, value=0),
-            pbc=mo.ui.number(0, 100, 5, value=100),
+            flow=mo.ui.number(0, 9, 0.1, value=0.2),
+            pac=mo.ui.number(0, 150, 5, value=0),
+            pbc=mo.ui.number(0, 150, 5, value=150),
         )
         .form()
     )
@@ -78,68 +82,10 @@ def __(mo):
 
 
 @app.cell
-def __(form, stop_protocol_button):
-    # dirbut = mo.ui.button(
-    #    label="SET LOG LOCATION", kind="info", on_change=lambda _: select_log_dir()
-    # )
-    stop_protocol_button if form.value else None
-    return
-
-
-@app.cell
-def tab_builder(mo, tab1, tab2, tab3):
-    tabs = mo.tabs(
-        {
-            "Dumb Control": tab1,
-            "Protocol Builder": tab2,
-            "Utilities": tab3,
-        }
-    )
+def tab_builder(tabs):
+    ### TAB LAYOUT CELL
     tabs
-    return tabs,
-
-
-@app.cell
-def seg_plotter(
-    form,
-    get_pump_start,
-    get_pump_time,
-    get_segs,
-    plt,
-    refresh,
-):
-    ### PLOTTING CELL
-    #   This cell builds the plot used for the segment builder
-    refresh
-    # advance_time()
-
-    _concs = []
-    _times = []
-    _count = 0
-
-    for _s in get_segs():
-        _times.append(_count)
-        _concs.append(_s.conc)
-        _count = _count + _s.time
-        _times.append(_count)
-        _concs.append(_s.conc)
-
-    _f, seg_ax = plt.subplots(figsize=(8, 2))
-    seg_ax.plot(
-        [time / 60 for time in _times],
-        _concs,
-    )
-    if get_pump_time() and get_pump_start():
-        plt.axvline((get_pump_time() - get_pump_start()).total_seconds() / 60)
-
-
-    seg_ax.set_ylabel("Conc (mM)")
-    seg_ax.set_xlabel("Time (min)")
-    if form.value:
-        # print("form set")
-        seg_ax.set_ylim([form.value["pac"], form.value["pbc"] * 1.10])
-    _f.tight_layout()
-    return seg_ax,
+    return
 
 
 @app.cell
@@ -154,7 +100,6 @@ def functions(
     get_segs,
     get_total_time,
     logging,
-    mo,
     pd_converter,
     port,
     pump_a,
@@ -169,9 +114,10 @@ def functions(
     set_seg_added,
     set_segs,
     set_total_time,
-    tab1_desired_conc_number,
 ):
-    ### THESE ARE FOR THE LOGIC OF THE SEGMENT BUILDER UI
+    ### SEGMENT BUILDER LOGIC AND UI
+    #
+
     def calculate_flowrates(conc_desired):
         """determines the flow rates for each pump based on the settings"""
         total_flow = float(form.value["flow"])
@@ -215,22 +161,6 @@ def functions(
             pump_b.stop()
 
 
-    update_pump_button = mo.ui.button(
-        label="Update settings",
-        on_change=lambda _: update_pumps(tab1_desired_conc_number.value),
-    )
-
-    start_pump_button = mo.ui.button(
-        label="Start Pump",
-        kind="success",
-        on_change=lambda _: start_pumps(tab1_desired_conc_number.value),
-    )
-
-    stop_pump_button = mo.ui.button(
-        label="Stop Pump", kind="danger", on_change=lambda _: stop_pumps()
-    )
-
-
     def add_seg():
         """add a segment to the list of segments state"""
         if (
@@ -249,7 +179,10 @@ def functions(
 
 
     def rm_last_seg():
-        """delete just the final segment from the state list (if you made an oopsie)"""
+        """
+        delete just the final segment from the state
+        list (if you made an oopsie)
+        """
         if len(get_segs()) > 0:
             set_segs(lambda s: s[:-1])
 
@@ -289,7 +222,7 @@ def functions(
             f" PROTOCOL SETTINGS: (sec, conc) {[(x.time, x.conc) for x in get_segs()]} "
         )
         logging.info(f" saving run to CSV at {get_csv_loc()}")
-        #with open(get_csv_loc(), "wb", newline="") as f:
+        # with open(get_csv_loc(), "wb", newline="") as f:
         #    writer = csv.writer(f)
         #    writer.writerow(["TIME", "CONC", "PUMP_A", "PUMP_B"])
         #    f.close()
@@ -339,7 +272,7 @@ def functions(
                 logging.info(
                     f" {datetime.now()} SEG IS {segi}, TIMER IS {timer}, TIME IS {_time}"
                 )
-                #with open(get_csv_loc(), "w") as f:
+                # with open(get_csv_loc(), "w") as f:
                 #    _conc = get_segs()[get_curr_seg()].conc
                 #    _concs = calculate_flowrates(_conc)
                 #    writer = csv.writer(f)
@@ -357,12 +290,9 @@ def functions(
         clear_segs,
         rm_last_seg,
         start_protocol,
-        start_pump_button,
         start_pumps,
         stop_protocol,
-        stop_pump_button,
         stop_pumps,
-        update_pump_button,
         update_pumps,
     )
 
@@ -374,7 +304,7 @@ def __(advance_time, refresh):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def __(
     add_seg_button,
     clear_segs_button,
@@ -384,14 +314,46 @@ def __(
     get_segs,
     get_total_time,
     mo,
+    padir,
+    paf,
+    pbdir,
+    pbf,
     rm_last_seg_button,
     seg_ax,
     seg_conc_box,
     seg_len_box,
+    start_pa_button,
+    start_pb_button,
     start_protocol_button,
+    start_pump_button,
+    stop_pa_button,
+    stop_pb_button,
     stop_protocol_button,
+    stop_pump_button,
+    tab1_desired_conc_number,
+    update_pump_button,
 ):
+    ### TAB SET UP
+    ### Strictly UI stuff here
+
     # SEGMENT TAB
+    tab1 = mo.vstack(
+        [
+            mo.md("### Single Run"),
+            mo.hstack(
+                [
+                    mo.md("Desired Concentration: "),
+                    tab1_desired_conc_number,
+                    mo.md(" (mM)"),
+                ],
+                justify="start",
+            ),
+            mo.hstack(
+                [update_pump_button, start_pump_button, stop_pump_button],
+                justify="start",
+            ),
+        ]
+    )
 
     tab2 = mo.vstack(
         [
@@ -438,112 +400,7 @@ def __(
             ),
         ]
     )
-    return tab2,
 
-
-@app.cell
-def classes_states(dataclass, mo):
-    ### CLASSES FOR THINGS
-    @dataclass
-    class Segment:
-        time: float  # seconds
-        conc: int  # millimolar
-
-
-    ### STATES FOR THINGS
-
-    # Segment Builder States
-    get_segs, set_segs = mo.state([])
-    seg_added, set_seg_added = mo.state(False)
-
-    # Pumps
-    # get_pumps, set_pumps = mo.state({})
-    pump_confirmed, set_pump_confirmed = mo.state(False)
-    get_pump_start, set_pump_start = mo.state(None)
-    get_pump_time, set_pump_time = mo.state(None)
-    get_total_time, set_total_time = mo.state(None)
-    get_curr_seg, set_curr_seg = mo.state(0)
-    return (
-        Segment,
-        get_curr_seg,
-        get_pump_start,
-        get_pump_time,
-        get_segs,
-        get_total_time,
-        pump_confirmed,
-        seg_added,
-        set_curr_seg,
-        set_pump_confirmed,
-        set_pump_start,
-        set_pump_time,
-        set_seg_added,
-        set_segs,
-        set_total_time,
-    )
-
-
-@app.cell
-def __():
-    # SEGMENT PUMP CONTROLS
-    return
-
-
-@app.cell
-def __(
-    add_seg,
-    clear_segs,
-    mo,
-    rm_last_seg,
-    start_protocol,
-    stop_protocol,
-):
-    # SEGMENT BUTTONS
-
-    add_seg_button = mo.ui.button(
-        label="add segment", on_change=lambda _: add_seg()
-    )
-
-    rm_last_seg_button = mo.ui.button(
-        label="remove last segment", on_change=lambda _: rm_last_seg()
-    )
-
-    clear_segs_button = mo.ui.button(
-        label="clear all segments", on_change=lambda _: clear_segs()
-    )
-
-    start_protocol_button = mo.ui.button(
-        label="Start Run", kind="success", on_change=lambda _: start_protocol()
-    )
-
-    stop_protocol_button = mo.ui.button(
-        label="Stop Run", kind="danger", on_change=lambda _: stop_protocol()
-    )
-    return (
-        add_seg_button,
-        clear_segs_button,
-        rm_last_seg_button,
-        start_protocol_button,
-        stop_protocol_button,
-    )
-
-
-@app.cell
-def tab_definer(
-    mo,
-    padir,
-    paf,
-    pbdir,
-    pbf,
-    start_pa_button,
-    start_pb_button,
-    start_pump_button,
-    stop_pa_button,
-    stop_pb_button,
-    stop_pump_button,
-    tab1_desired_conc_number,
-    update_pump_button,
-):
-    ### ASSEMBLE THE TABS
     tab3 = mo.vstack(
         [
             mo.md("### Utilities"),
@@ -584,30 +441,133 @@ def tab_definer(
             ),
         ]
     )
-    tab1 = mo.vstack(
-        [
-            mo.md("### Single Run"),
-            mo.hstack(
-                [
-                    mo.md("Desired Concentration: "),
-                    tab1_desired_conc_number,
-                    mo.md(" (mM)"),
-                ],
-                justify="start",
-            ),
-            mo.hstack(
-                [update_pump_button, start_pump_button, stop_pump_button],
-                justify="start",
-            ),
-        ]
+
+    tabs = mo.tabs(
+        {
+            "Dumb Control": tab1,
+            "Protocol Builder": tab2,
+            "Utilities": tab3,
+        }
     )
-    return tab1, tab3
+    return tab1, tab2, tab3, tabs
+
+
+@app.cell(hide_code=True)
+def classes(dataclass):
+    ### CLASSES
+
+
+    @dataclass
+    class Segment:
+        """
+        A protocol segment is essentially just a concentration
+        and a length of time, which I've set to seconds.
+        """
+
+        time: float  # seconds
+        conc: int  # millimolar
+    return Segment,
 
 
 @app.cell
+def states(mo):
+    ### STATES
+
+    # Segment Builder States
+    get_segs, set_segs = mo.state([])
+    seg_added, set_seg_added = mo.state(False)
+
+    # Pumps
+    pump_confirmed, set_pump_confirmed = mo.state(False)
+    get_pump_start, set_pump_start = mo.state(None)
+    get_pump_time, set_pump_time = mo.state(None)
+    get_total_time, set_total_time = mo.state(None)
+    get_curr_seg, set_curr_seg = mo.state(0)
+    return (
+        get_curr_seg,
+        get_pump_start,
+        get_pump_time,
+        get_segs,
+        get_total_time,
+        pump_confirmed,
+        seg_added,
+        set_curr_seg,
+        set_pump_confirmed,
+        set_pump_start,
+        set_pump_time,
+        set_seg_added,
+        set_segs,
+        set_total_time,
+    )
+
+
+@app.cell
+def ui_elements(
+    add_seg,
+    clear_segs,
+    mo,
+    rm_last_seg,
+    start_protocol,
+    start_pumps,
+    stop_protocol,
+    stop_pumps,
+    tab1_desired_conc_number,
+    update_pumps,
+):
+    ### UI ELEMENTS
+    #   All buttons, spots, etc.
+
+    add_seg_button = mo.ui.button(
+        label="add segment", on_change=lambda _: add_seg()
+    )
+
+    rm_last_seg_button = mo.ui.button(
+        label="remove last segment", on_change=lambda _: rm_last_seg()
+    )
+
+    clear_segs_button = mo.ui.button(
+        label="clear all segments", on_change=lambda _: clear_segs()
+    )
+
+    start_protocol_button = mo.ui.button(
+        label="Start Run", kind="success", on_change=lambda _: start_protocol()
+    )
+
+    stop_protocol_button = mo.ui.button(
+        label="Stop Run", kind="danger", on_change=lambda _: stop_protocol()
+    )
+
+    update_pump_button = mo.ui.button(
+        label="Update settings",
+        on_change=lambda _: update_pumps(tab1_desired_conc_number.value),
+    )
+
+    start_pump_button = mo.ui.button(
+        label="Start Pump",
+        kind="success",
+        on_change=lambda _: start_pumps(tab1_desired_conc_number.value),
+    )
+
+    stop_pump_button = mo.ui.button(
+        label="Stop Pump", kind="danger", on_change=lambda _: stop_pumps()
+    )
+    return (
+        add_seg_button,
+        clear_segs_button,
+        rm_last_seg_button,
+        start_protocol_button,
+        start_pump_button,
+        stop_protocol_button,
+        stop_pump_button,
+        update_pump_button,
+    )
+
+
+@app.cell(hide_code=True)
 def seg_refresher(mo, seg_added):
-    # Refresh the entry form whenever a task is added
-    # I guess this needs to be its own cell?
+    ### REFRESH SEGMENT UI COMPONENTS
+    #   Since these are being refreshed when a segment is added, they
+    #   can't be located in the main UI cell.
     seg_added
 
     seg_len_box = mo.ui.number(0, 10, step=0.25, value=0)
@@ -744,6 +704,60 @@ def imports():
         plt,
         time,
     )
+
+
+@app.cell(disabled=True)
+def __(form, stop_protocol_button):
+    ## EMERGENCY STOP BUTTON (in case the form breaks)
+
+    # dirbut = mo.ui.button(
+    #    label="SET LOG LOCATION", kind="info", on_change=lambda _: select_log_dir()
+    # )
+    stop_protocol_button if form.value else None
+    return
+
+
+@app.cell(hide_code=True)
+def seg_plotter(
+    form,
+    get_pump_start,
+    get_pump_time,
+    get_segs,
+    plt,
+    refresh,
+):
+    ### PLOTTING CELL
+    #   This cell builds the plot used for the segment builder.
+    #   It refreshes based on the refresh rate chosen.
+
+    refresh
+
+    _concs = []
+    _times = []
+    _count = 0
+
+    for _s in get_segs():
+        _times.append(_count)
+        _concs.append(_s.conc)
+        _count = _count + _s.time
+        _times.append(_count)
+        _concs.append(_s.conc)
+
+    _f, seg_ax = plt.subplots(figsize=(8, 2))
+    seg_ax.plot(
+        [time / 60 for time in _times],
+        _concs,
+    )
+    if get_pump_time() and get_pump_start():
+        plt.axvline((get_pump_time() - get_pump_start()).total_seconds() / 60)
+
+
+    seg_ax.set_ylabel("Conc (mM)")
+    seg_ax.set_xlabel("Time (min)")
+    if form.value:
+        seg_ax.set_ylim([form.value["pac"], form.value["pbc"] * 1.10])
+    _f.tight_layout()
+    return seg_ax,
 
 
 if __name__ == "__main__":
