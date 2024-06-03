@@ -1,21 +1,21 @@
 import marimo
 
-__generated_with = "0.2.0"
+__generated_with = "0.6.11"
 app = marimo.App()
 
 
-@app.cell(hide_code=True)
+@app.cell
 def title(mo):
     mo.md(
         f"""
         ## Pump Program Builder
-        Use this to design a series of concentrations while imaging. 
+        Use this to design a series of concentrations while imaging.
         """
     )
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(logging, mo):
     # Export Run Log for tracking purposes
 
@@ -27,7 +27,7 @@ def __(logging, mo):
     return get_csv_loc, log_loc, set_csv_loc
 
 
-@app.cell(hide_code=True)
+@app.cell
 def pump_init(mo, nesp_lib):
     ###### SET PORT HERE
     _port = "/dev/cu.usbserial-210"
@@ -91,10 +91,8 @@ def tab_builder(tabs):
 @app.cell
 def functions(
     Segment,
-    csv_loc,
     datetime,
     form,
-    get_csv_loc,
     get_curr_seg,
     get_pump_start,
     get_segs,
@@ -116,7 +114,7 @@ def functions(
     set_total_time,
 ):
     ### SEGMENT BUILDER LOGIC AND UI
-    #
+
 
     def calculate_flowrates(conc_desired):
         """determines the flow rates for each pump based on the settings"""
@@ -163,9 +161,7 @@ def functions(
 
     def add_seg():
         """add a segment to the list of segments state"""
-        if (
-            seg_len_box.value > 0 and seg_conc_box.value >= 0
-        ):  # no adding blank segments
+        if seg_len_box.value > 0 and seg_conc_box.value >= 0:  # no adding blank segments
             set_segs(
                 lambda v: v
                 + [
@@ -176,6 +172,10 @@ def functions(
                 ]
             )
             set_seg_added(True)
+
+
+    def add_grad():
+        """makes lots of tiny segments via add_seg()"""
 
 
     def rm_last_seg():
@@ -206,22 +206,16 @@ def functions(
 
     def start_protocol():
         set_pump_start(datetime.now())
-        set_csv_loc(
-            csv_loc + f"{get_pump_start().strftime('%Y-%m-%d_%H-%M')}" + ".csv"
-        )
+        # set_csv_loc(csv_loc + f"{get_pump_start().strftime('%Y-%m-%d_%H-%M')}" + ".csv")
         _pac = form.value["pac"]
         _pbc = form.value["pbc"]
         _flow = form.value["flow"]
-        logging.info(
-            f" ###############################################################"
-        )
+        logging.info(f" ###############################################################")
         logging.info(f" PUMP STARTED: {get_pump_start()}")
         logging.info(f" Pump A is {_pac} mM, Pump B is {_pbc} mM")
         logging.info(f" Total flow rate is {_flow} ml/min")
-        logging.info(
-            f" PROTOCOL SETTINGS: (sec, conc) {[(x.time, x.conc) for x in get_segs()]} "
-        )
-        logging.info(f" saving run to CSV at {get_csv_loc()}")
+        logging.info(f" PROTOCOL SETTINGS: (sec, conc) {[(x.time, x.conc) for x in get_segs()]} ")
+        # logging.info(f" saving run to CSV at {get_csv_loc()}")
         # with open(get_csv_loc(), "wb", newline="") as f:
         #    writer = csv.writer(f)
         #    writer.writerow(["TIME", "CONC", "PUMP_A", "PUMP_B"])
@@ -231,23 +225,21 @@ def functions(
             for seg in get_segs():
                 _time = _time + seg.time
         set_total_time(_time)
-        logging.info(
-            f" {datetime.now()}: INITIATE: {get_pump_start()}, {get_total_time()}"
-        )
+        logging.info(f" {datetime.now()}: INITIATE: {get_pump_start()}, {get_total_time()}")
         start_pumps(get_segs()[get_curr_seg()].conc)
         advance_time()
 
 
     def advance_time():
+        """
+        This function tracks the current time relative to the length of the
+        protocol, and is how it knows to switch to the next segment.
+        """
         if get_pump_start() != None:
-            _time = (
-                datetime.now() - get_pump_start()
-            ).total_seconds()  # get time in protocol
+            _time = (datetime.now() - get_pump_start()).total_seconds()  # get time in protocol
             if _time < get_total_time():  # we haven't gone through the whole run
                 set_pump_time(datetime.now())
-                timer = get_segs()[
-                    0
-                ].time  # timer starts at the length of segment 1
+                timer = get_segs()[0].time  # timer starts at the length of segment 1
                 segi = 0
 
                 while True:
@@ -264,14 +256,10 @@ def functions(
                         break
                 if segi > get_curr_seg():
                     set_curr_seg(segi)
-                    logging.info(
-                        f" {datetime.now()}: Segment change! Now on segment {segi}, {get_curr_seg()}"
-                    )
+                    logging.info(f" {datetime.now()}: Segment change! Now on segment {segi}, {get_curr_seg()}")
                     start_pumps(get_segs()[get_curr_seg()].conc)
                     # LOG!
-                logging.info(
-                    f" {datetime.now()} SEG IS {segi}, TIMER IS {timer}, TIME IS {_time}"
-                )
+                logging.info(f" {datetime.now()} SEG IS {segi}, TIMER IS {timer}, TIME IS {_time}")
                 # with open(get_csv_loc(), "w") as f:
                 #    _conc = get_segs()[get_curr_seg()].conc
                 #    _concs = calculate_flowrates(_conc)
@@ -284,6 +272,7 @@ def functions(
             else:
                 stop_protocol()
     return (
+        add_grad,
         add_seg,
         advance_time,
         calculate_flowrates,
@@ -304,7 +293,7 @@ def __(advance_time, refresh):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(
     add_seg_button,
     clear_segs_button,
@@ -371,33 +360,15 @@ def __(
                 [add_seg_button, rm_last_seg_button, clear_segs_button],
                 justify="start",
             ),
-            mo.hstack(
-                [start_protocol_button, stop_protocol_button], justify="start"
-            ),
+            mo.hstack([start_protocol_button, stop_protocol_button], justify="start"),
+            (mo.md(f"Start Time is {get_pump_start()}") if get_pump_start() else None),
             (
-                mo.md(f"Start Time is {get_pump_start()}")
+                mo.md(f"Current Time is {((get_pump_time()-get_pump_start()).total_seconds()/60):.3f} min")
                 if get_pump_start()
                 else None
             ),
-            (
-                mo.md(
-                    f"Current Time is {((get_pump_time()-get_pump_start()).total_seconds()/60):.3f} min"
-                )
-                if get_pump_start()
-                else None
-            ),
-            (
-                mo.md(f"Total Time is {(get_total_time()/60):.2f} min")
-                if get_pump_start()
-                else None
-            ),
-            (
-                mo.md(
-                    f"Current Concentration is {get_segs()[get_curr_seg()].conc}"
-                )
-                if get_pump_start()
-                else None
-            ),
+            (mo.md(f"Total Time is {(get_total_time()/60):.2f} min") if get_pump_start() else None),
+            (mo.md(f"Current Concentration is {get_segs()[get_curr_seg()].conc}") if get_pump_start() else None),
         ]
     )
 
@@ -410,9 +381,7 @@ def __(
                         mo.vstack(
                             [
                                 mo.md("**Pump A**"),
-                                mo.hstack(
-                                    [mo.md("Flow: "), paf, mo.md("(ml/min)")]
-                                ),
+                                mo.hstack([mo.md("Flow: "), paf, mo.md("(ml/min)")]),
                                 mo.hstack([mo.md("Direction: "), padir]),
                                 mo.hstack(
                                     [start_pa_button, stop_pa_button],
@@ -425,9 +394,7 @@ def __(
                         mo.vstack(
                             [
                                 mo.md("**Pump B**"),
-                                mo.hstack(
-                                    [mo.md("Flow: "), pbf, mo.md("(ml/min)")]
-                                ),
+                                mo.hstack([mo.md("Flow: "), pbf, mo.md("(ml/min)")]),
                                 mo.hstack([mo.md("Direction: "), pbdir]),
                                 mo.hstack(
                                     [start_pb_button, stop_pb_button],
@@ -452,11 +419,9 @@ def __(
     return tab1, tab2, tab3, tabs
 
 
-@app.cell(hide_code=True)
+@app.cell
 def classes(dataclass):
     ### CLASSES
-
-
     @dataclass
     class Segment:
         """
@@ -517,25 +482,15 @@ def ui_elements(
     ### UI ELEMENTS
     #   All buttons, spots, etc.
 
-    add_seg_button = mo.ui.button(
-        label="add segment", on_change=lambda _: add_seg()
-    )
+    add_seg_button = mo.ui.button(label="add segment", on_change=lambda _: add_seg())
 
-    rm_last_seg_button = mo.ui.button(
-        label="remove last segment", on_change=lambda _: rm_last_seg()
-    )
+    rm_last_seg_button = mo.ui.button(label="remove last segment", on_change=lambda _: rm_last_seg())
 
-    clear_segs_button = mo.ui.button(
-        label="clear all segments", on_change=lambda _: clear_segs()
-    )
+    clear_segs_button = mo.ui.button(label="clear all segments", on_change=lambda _: clear_segs())
 
-    start_protocol_button = mo.ui.button(
-        label="Start Run", kind="success", on_change=lambda _: start_protocol()
-    )
+    start_protocol_button = mo.ui.button(label="Start Run", kind="success", on_change=lambda _: start_protocol())
 
-    stop_protocol_button = mo.ui.button(
-        label="Stop Run", kind="danger", on_change=lambda _: stop_protocol()
-    )
+    stop_protocol_button = mo.ui.button(label="Stop Run", kind="danger", on_change=lambda _: stop_protocol())
 
     update_pump_button = mo.ui.button(
         label="Update settings",
@@ -548,9 +503,7 @@ def ui_elements(
         on_change=lambda _: start_pumps(tab1_desired_conc_number.value),
     )
 
-    stop_pump_button = mo.ui.button(
-        label="Stop Pump", kind="danger", on_change=lambda _: stop_pumps()
-    )
+    stop_pump_button = mo.ui.button(label="Stop Pump", kind="danger", on_change=lambda _: stop_pumps())
     return (
         add_seg_button,
         clear_segs_button,
@@ -563,7 +516,7 @@ def ui_elements(
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def seg_refresher(mo, seg_added):
     ### REFRESH SEGMENT UI COMPONENTS
     #   Since these are being refreshed when a segment is added, they
@@ -627,19 +580,11 @@ def __(mo, nesp_lib, port, pump_a, pump_b):
     padir = mo.ui.dropdown(["INFUSE", "WITHDRAW"], value="INFUSE")
     pbdir = mo.ui.dropdown(["INFUSE", "WITHDRAW"], value="INFUSE")
 
-    start_pa_button = mo.ui.button(
-        label="Start", kind="success", on_change=lambda _: start_pa()
-    )
-    stop_pa_button = mo.ui.button(
-        label="Stop", kind="danger", on_change=lambda _: stop_pa()
-    )
+    start_pa_button = mo.ui.button(label="Start", kind="success", on_change=lambda _: start_pa())
+    stop_pa_button = mo.ui.button(label="Stop", kind="danger", on_change=lambda _: stop_pa())
 
-    start_pb_button = mo.ui.button(
-        label="Start", kind="success", on_change=lambda _: start_pb()
-    )
-    stop_pb_button = mo.ui.button(
-        label="Stop", kind="danger", on_change=lambda _: stop_pb()
-    )
+    start_pb_button = mo.ui.button(label="Start", kind="success", on_change=lambda _: start_pb())
+    stop_pb_button = mo.ui.button(label="Stop", kind="danger", on_change=lambda _: stop_pb())
     return (
         padir,
         paf,
@@ -657,7 +602,7 @@ def __(mo, nesp_lib, port, pump_a, pump_b):
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(mo):
     # This outputs a timer that fires once a second
 
@@ -677,6 +622,10 @@ def __():
     #   Timing flow to end was about 8-8.25 seconds. So ~0.00745 m/s flow velocity
     #   Based on the diameter, this means a flow rate of about 0.15 ml/min
     #   Alternatively, 10.7 ml/hr, or 10700 uL/hr.
+    #
+    #   I've played around with flow rates, and a rate of ~0.4-0.5 ml/min is a good
+    #   compromise between speed of flow (decreases time between switching) and
+    #   backpressure.
     return
 
 
@@ -717,7 +666,7 @@ def __(form, stop_protocol_button):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def seg_plotter(
     form,
     get_pump_start,
