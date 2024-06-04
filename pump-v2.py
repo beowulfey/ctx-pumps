@@ -5,7 +5,7 @@ app = marimo.App()
 
 
 @app.cell
-def __(logging, mo, nesp_lib, port_dropdown):
+def __(logging, mo, nesp_lib):
     ### This cell shows a banner if the pumps are not properly connected.
 
     _banner = mo.md(
@@ -17,7 +17,7 @@ def __(logging, mo, nesp_lib, port_dropdown):
     # Initialize Pumps.
     # The global "port" variable allows for logic to work with or without a pump connected, # for testing purposes.
     try:
-        port = nesp_lib.Port(port_dropdown.value, 19200)
+        port = nesp_lib.Port("COM11", 19200)
     except:
         port = None
     else:
@@ -44,7 +44,7 @@ def __(mo):
 
 
 @app.cell
-def __(datetime, logging, mo, ports):
+def __(datetime, logging, mo):
     ### Contains a form that sets the pump parameters
 
 
@@ -60,25 +60,21 @@ def __(datetime, logging, mo, ports):
             """
         **Pump Parameters**
 
-        Pump Port: {port_select}
-
         Total flow rate: {flow} (ml/min)
 
         Pump A syringe concentration: {pac} (mM)
 
         Pump B syringe concentration: {pbc} (mM)
 
-        Pump update rate: every {pur} (sec)
-
         ---
     """
         )
         .batch(
-            port_select=mo.ui.dropdown(ports, value=ports[0]),
+            # port_select=mo.ui.dropdown(ports, value=ports[0]),
             flow=mo.ui.number(0, 9, 0.1, value=0.4),
             pac=mo.ui.number(0, 150, 5, value=0),
             pbc=mo.ui.number(0, 150, 5, value=100),
-            pur=mo.ui.slider(0.1, 1, 0.1, value=0.5),
+            # pur=mo.ui.slider(0.1, 1, 0.1, value=0.5),
         )
         .form(on_change=lambda _: _submit_form())
     )
@@ -86,7 +82,7 @@ def __(datetime, logging, mo, ports):
     return form,
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(
     add_seg_button,
     clear_segs_button,
@@ -140,7 +136,11 @@ def __(
                 justify="start",
             ),
             mo.hstack(
-                [add_seg_button, rm_last_seg_button, clear_segs_button,],
+                [
+                    add_seg_button,
+                    rm_last_seg_button,
+                    clear_segs_button,
+                ],
                 justify="start",
             ),
         ]
@@ -152,7 +152,10 @@ def __(
             mo.md("### Protocol Builder"),
             seg_ax,
             _seg_tab,
-            mo.hstack([start_protocol_button, stop_protocol_button, mo.md("Leave pump running: "), leave_pump_running], justify="start"),
+            mo.hstack(
+                [start_protocol_button, stop_protocol_button, mo.md("Leave pump running: "), leave_pump_running],
+                justify="start",
+            ),
         ]
     )
 
@@ -175,8 +178,8 @@ def __(
     mo,
     rm_seg,
     run_pumps,
-    set_pump_start,
     start_protocol,
+    stop_protocol,
     stop_pumps,
     update_pumps,
 ):
@@ -188,7 +191,6 @@ def __(
 
     # For straight runs, doesn't let you go higher or lower than pump values.
     straight_run_conc = mo.ui.number(_pac, _pbc, 5, value=(_pac + _pbc) / 2)
-
 
 
     # Update
@@ -213,7 +215,9 @@ def __(
 
     start_protocol_button = mo.ui.button(label="Start Run", kind="success", on_change=lambda _: start_protocol())
 
-    stop_protocol_button = mo.ui.button(label="Stop Run", kind="danger", on_change=lambda _: set_pump_start(False))#_: stop_protocol(True))
+    stop_protocol_button = mo.ui.button(
+        label="Stop Run", kind="danger", on_change=lambda _: stop_protocol(True)
+    )  # _: stop_protocol(True))
     return (
         add_seg_button,
         clear_segs_button,
@@ -233,12 +237,12 @@ def __(form, mo, seg_added):
     _pac = int(form.value["pac"]) if form.value is not None else 0
     _pbc = int(form.value["pbc"]) if form.value is not None else 100
     seg_added
-    seg_len_box = mo.ui.number(0, 120, step=0.1, value=0)
+    seg_len_box = mo.ui.number(0, 120, step=0.05, value=0)
     seg_conc_box = mo.ui.number(_pac, _pbc, step=5, value=0)
     return seg_conc_box, seg_len_box
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(form, mo, seg_added, seg_conc_box):
     # Sets default values for gradient concentration selector
     _pac = int(form.value["pac"]) if form.value is not None else 0
@@ -254,8 +258,8 @@ def __(
     datetime,
     form,
     get_curr,
+    get_frame_time,
     get_prot,
-    get_pump_start,
     get_segs,
     grad_conc_box,
     logging,
@@ -263,13 +267,16 @@ def __(
     nesp_lib,
     np,
     port,
+    protocol_running,
     pumps,
+    refresh,
     seg_conc_box,
     seg_len_box,
+    set_advance,
     set_curr,
+    set_frame_time,
     set_prot,
-    set_pump_start,
-    set_running,
+    set_protocol_running,
     set_seg_added,
     set_segs,
     time,
@@ -299,11 +306,10 @@ def __(
         for seg in get_segs():
             x = [total_time, total_time + seg.time]
             y = [seg.conc_in, seg.conc_out]
-            print(x, y)
-            steps = int(seg.time / form.value["pur"]) + 1
+            # steps = int(seg.time / form.value["pur"]) + 1
+            steps = int(seg.time)  # Locked at 1 second now.
             x_expanded = np.linspace(x[0], x[1], steps, endpoint=True)
             y_expanded = np.interp(x_expanded, x, y)
-            print(x_expanded, y_expanded)
             xtot = xtot + x_expanded.tolist()
             ytot = ytot + y_expanded.tolist()
             total_time += seg.time
@@ -320,6 +326,8 @@ def __(
         # First, checks if pumps are running and stops them if so.
         if port:
             for _pump in pumps:
+                _pump.pumping_direction = nesp_lib.PumpingDirection.INFUSE
+                # DO I NEED TO DO THIS?!?!
                 if _pump.running:
                     _pump.stop()
             # Then, it runs the pumps at the new flow rates.
@@ -374,47 +382,69 @@ def __(
         set_segs([])
         set_prot([[], []])
 
+
     leave_pump_running = mo.ui.checkbox(value=True)
 
+
     def stop_protocol(force=False):
-        set_pump_start(False)
-        logging.info(f" {datetime.now()}: PROTOCOL STOPPED")
+        set_protocol_running(False)
+
         if not force:
-            stop_pumps() if leave_pump_running.value else None
+            logging.info(f" {datetime.now()}: PROTOCOL ENDED PEACEFULLY")
+            if leave_pump_running.value:
+                stop_pumps()
+            else:
+                logging.info(f" {datetime.now()}: PUMPS ALLOWED TO KEEP PUMPING")
+        else:
+            logging.info(f" {datetime.now()}: PROTOCOL STOPPED")
 
 
     def start_protocol():
-        #print("HELLO!")
-        set_pump_start(True)
+        logging.info(f" #################################################")
+        logging.info(f" ############### PROTOCOL BEGAN!! ################")
+        logging.info(f" {datetime.now()} <-- INITIATED AT THIS TIME")
+        logging.info(f" PROTOCOL SETTINGS: (seconds, conc_in, conc_out)  ")
+        for i, _seg in enumerate(get_segs()):
+            logging.info(f"{i}: {_seg.time} sec; {_seg.conc_in} mM --> {_seg.conc_out} mM")
         _pac = form.value["pac"]
         _pbc = form.value["pbc"]
         _flow = form.value["flow"]
-        logging.info(f" PROTOCOL SETTINGS: (seconds, conc_in, conc_out)  ")
-        logging.info(f" {datetime.now()} <-- INITIATED AT THIS TIME")
         set_curr(0)
-        run_protocol()
+        # x, y = get_prot()
+        # run_pumps(y[0])
+        # set_curr(get_curr() + 1)
+        set_frame_time(datetime.now())
+        set_protocol_running(True)
+        advance_protocol()
 
-    def run_protocol():
-        if get_pump_start():
-            x,y = get_prot()
-            if y:
-                while get_curr() < len(y):
-                    n = get_curr()
-                    #print(y[n])
-                    run_pumps(y[n])
-                    time.sleep(form.value["pur"])
-                    set_curr(get_curr()+1)
-                    set_running(True)
-            if get_curr() >= len(y):
+
+    def advance_protocol():
+        if protocol_running:
+            x, y = get_prot()
+            if get_curr() < len(y):
+                # check if frame matches time
+                if (datetime.now() - get_frame_time()).total_seconds() >= 1:
+                    run_pumps(y[get_curr()])
+                    set_curr(get_curr() + 1)
+                    set_frame_time(datetime.now())
+                    set_advance(True)
+                else:
+                    time.sleep(0.1)
+            else:
                 stop_protocol()
+
+
+    refresh
+    if protocol_running():
+        advance_protocol()
     return (
         add_seg,
+        advance_protocol,
         calculate_flowrates,
         clear_segs,
         generate_timepoints,
         leave_pump_running,
         rm_seg,
-        run_protocol,
         run_pumps,
         start_protocol,
         stop_protocol,
@@ -424,39 +454,58 @@ def __(
 
 
 @app.cell
-def __(get_pump_start, run_protocol, running):
-    running
-
-    if get_pump_start():
-        run_protocol()
+def __(advance, advance_protocol, protocol_running):
+    advance
+    if protocol_running():
+        advance_protocol()
     return
 
 
 @app.cell
-def __(mo):
+def __(datetime, mo):
     ### Global state variables
 
-    # Segment Builder States
+    # Segments saved within the builder
     get_segs, set_segs = mo.state([])
+
+    # Used to refresh the segment entry panel
     seg_added, set_seg_added = mo.state(False)
+
+    # Used to refresh the current frame
+    advance, set_advance = mo.state(False)
+
+    # The current protocol as a list of ([times], [concentrations])
     get_prot, set_prot = mo.state([[], []])
-    get_pump_start, set_pump_start = mo.state(False)
-    running, set_running = mo.state(False)
+
+    # Current "frame" in the animation
     get_curr, set_curr = mo.state(0)
+    get_frame_time, set_frame_time = mo.state(datetime.now())
+
+    # Is the protocol running now?
+    protocol_running, set_protocol_running = mo.state(False)
     return (
+        advance,
         get_curr,
+        get_frame_time,
         get_prot,
-        get_pump_start,
         get_segs,
-        running,
+        protocol_running,
         seg_added,
+        set_advance,
         set_curr,
+        set_frame_time,
         set_prot,
-        set_pump_start,
-        set_running,
+        set_protocol_running,
         set_seg_added,
         set_segs,
     )
+
+
+@app.cell
+def __(mo):
+    refresh = mo.ui.refresh(default_interval="1s")
+    refresh
+    return refresh,
 
 
 @app.cell
@@ -479,10 +528,12 @@ def __():
 
 
 @app.cell
-def __(form, get_curr, get_prot, get_pump_start, plt):
+def __(form, get_curr, get_prot, plt, protocol_running, refresh):
     ### PLOTTING CELL
     #   This cell builds the plot used for the segment builder.
     #   It refreshes based on the refresh rate chosen.
+
+    refresh
 
     _times = get_prot()[0]
     _concs = get_prot()[1]
@@ -492,9 +543,8 @@ def __(form, get_curr, get_prot, get_pump_start, plt):
         _concs,
     )
 
-    if get_pump_start():
-        print(get_prot()[0][get_curr()])
-        plt.axvline((get_prot()[0][get_curr()])/60)
+    if protocol_running() and get_curr() < len(get_prot()[0]):
+        plt.axvline((get_prot()[0][get_curr()] / 60), color="r")
     seg_ax.set_ylabel("Conc (mM)")
     seg_ax.set_xlabel("Time (min)")
     if form.value:
@@ -514,7 +564,6 @@ def __():
     import nesp_lib
     import logging
     from decimal import Decimal
-    import asyncio
 
     ### Contains variables for logging and ports.
 
@@ -523,10 +572,9 @@ def __():
     logging.basicConfig(filename=f"./logs/{_today}_run.log", encoding="utf-8", level=logging.INFO)
 
     # Get COM ports for system.
-    ports = [str(_port).split(" ")[0] for _port in list_ports.comports()]
+    # ports = [str(_port).split(" ")[0] for _port in list_ports.comports()]
     return (
         Decimal,
-        asyncio,
         datetime,
         list_ports,
         logging,
@@ -534,7 +582,6 @@ def __():
         nesp_lib,
         np,
         plt,
-        ports,
         time,
     )
 
